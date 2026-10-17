@@ -7,6 +7,8 @@ SQL functions. The privileged service client is only obtained through
 from __future__ import annotations
 
 import re
+import secrets
+import string
 from datetime import date
 
 import httpx
@@ -87,15 +89,34 @@ def list_shops(state) -> list[dict]:
     return _db(lambda: client.table("shops").select("*").order("shop_number").execute().data)
 
 
-def create_shop(state, shop_name, owner_name, email, phone="", status="active"):
+def generate_password(length: int = 12) -> str:
+    """Random password with letters and digits (always at least one of each)."""
+    alphabet = string.ascii_letters + string.digits
+    while True:
+        pw = "".join(secrets.choice(alphabet) for _ in range(length))
+        if any(c.isalpha() for c in pw) and any(c.isdigit() for c in pw):
+            return pw
+
+
+def create_shop(state, shop_name, owner_name, email, phone="", status="active", password=None):
+    """Create a shop. With ``password`` the admin shares the login; otherwise an invite email is sent."""
     try:
         f = _clean(shop_name, owner_name, email, phone, status)
+        if password is not None:
+            problem = auth.validate_new_password(password, password)
+            if problem:
+                raise ValueError(problem)
         _rpc(state, "admin_can_create_shop", {"p_email": f["email"]})  # limit + duplicate pre-check
         svc = sc.service_client(state)
-        options = {"data": {"shop_name": f["shop_name"]}}
-        if sc.app_url():
-            options["redirect_to"] = sc.app_url()
-        result = _auth_call(lambda: svc.auth.admin.invite_user_by_email(f["email"], options))
+        if password is not None:
+            result = _auth_call(lambda: svc.auth.admin.create_user({
+                "email": f["email"], "password": password, "email_confirm": True,
+                "user_metadata": {"shop_name": f["shop_name"]}}))
+        else:
+            options = {"data": {"shop_name": f["shop_name"]}}
+            if sc.app_url():
+                options["redirect_to"] = sc.app_url()
+            result = _auth_call(lambda: svc.auth.admin.invite_user_by_email(f["email"], options))
         user = getattr(result, "user", None)
         if user is None:
             raise AdminError("The invitation could not be created.")
@@ -109,6 +130,8 @@ def create_shop(state, shop_name, owner_name, email, phone="", status="active"):
             except Exception:
                 pass
             raise
+        if password is not None:
+            return True, f"Shop '{f['shop_name']}' created. Share the login details below with the owner.", shop
         return True, f"Shop '{f['shop_name']}' created. An invitation email was sent to {f['email']}.", shop
     except HANDLED as exc:
         return False, str(exc), None
@@ -146,6 +169,19 @@ def set_status(state, shop_id: str, status: str):
         _rpc(state, "admin_set_shop_status", {"p_shop_id": shop_id, "p_status": status})
         return True, ("Shop activated." if status == "active"
                       else "Shop suspended. Its data is kept and it is blocked immediately.")
+    except HANDLED as exc:
+        return False, str(exc)
+
+
+def set_password(state, shop: dict, password: str):
+    """Admin sets a new password for a shop owner (to be shared with them)."""
+    try:
+        problem = auth.validate_new_password(password, password)
+        if problem:
+            raise ValueError(problem)
+        svc = sc.service_client(state)
+        _auth_call(lambda: svc.auth.admin.update_user_by_id(shop["owner_user_id"], {"password": password}))
+        return True, "New password saved. Share it with the shop owner."
     except HANDLED as exc:
         return False, str(exc)
 
@@ -225,9 +261,20 @@ def page_admin_dashboard(state) -> None:
         _table(_shops_df(shops).drop(columns=["Actions"]))
 
 
+def _show_new_credentials() -> None:
+    creds = S.pop("new_creds", None)
+    if creds:
+        st.warning("Copy these login details now and send them to the shop owner. "
+                   "The password is shown only this once.")
+        st.code(f"Shop: {creds['shop']}\nEmail: {creds['email']}\nPassword: {creds['password']}\n"
+                f"Login at: {sc.app_url() or 'your SmartStock AI app link'}", language=None)
+        st.caption("Tell the owner to change the password in Account Settings after the first login.")
+
+
 def page_shop_management(state) -> None:
     st.header("Shop Management")
     _show_flash()
+    _show_new_credentials()
     ov = overview(state)
     shops = list_shops(state)
 
@@ -235,18 +282,34 @@ def page_shop_management(state) -> None:
         if ov["slots"] == 0:
             st.error("Shop limit reached (10). Delete a shop before creating another.")
         else:
-            st.caption(f"{ov['slots']} slot(s) available. The owner receives an email invitation "
-                       "and sets their own password.")
-            with st.form("create_shop", clear_on_submit=True):
+            st.caption(f"{ov['slots']} slot(s) available.")
+            method = st.radio("How does the owner get access?",
+                              ["I create the password and share it", "Send an email invitation"],
+                              key="create_method")
+            share = method.startswith("I create")
+            if "gen_pw" not in S:
+                S["gen_pw"] = generate_password()
+            nonce = S.setdefault("create_nonce", 0)  # new form key after success = cleared fields
+            with st.form(f"create_shop_{nonce}"):
                 name = st.text_input("Shop Name *")
                 owner = st.text_input("Owner Name *")
-                email = st.text_input("Email Address *")
+                email = st.text_input("Email Address (used to log in) *")
                 phone = st.text_input("Phone Number (optional)")
                 status = st.selectbox("Account Status", ["active", "suspended"],
                                       format_func=str.title)
+                password = None
+                if share:
+                    password = st.text_input("Password for the owner", value=S["gen_pw"],
+                                             help="A random password is suggested. You can type your own "
+                                                  "(8+ characters, letters and numbers).")
                 if st.form_submit_button("Create Shop", type="primary"):
-                    ok, msg, _ = create_shop(state, name, owner, email, phone, status)
+                    ok, msg, shop = create_shop(state, name, owner, email, phone, status, password)
                     if ok:
+                        S["create_nonce"] = nonce + 1
+                        if share:
+                            S["new_creds"] = {"shop": shop["shop_name"], "email": shop["email"],
+                                              "password": password}
+                            S["gen_pw"] = generate_password()
                         _flash("success", msg)
                         st.rerun()
                     st.error(msg)
@@ -281,6 +344,16 @@ def page_shop_management(state) -> None:
         ok, msg = send_reset(state, shop["email"])
         _flash("success" if ok else "error", msg)
         st.rerun()
+
+    with st.expander("Set a new password for this shop"):
+        st.caption("Use this when the owner forgot the password. Then share the new password with them.")
+        new_pw = st.text_input("New password", value=generate_password(), key=f"setpw_{shop_id}")
+        if st.button("Save new password", key=f"savepw_{shop_id}"):
+            ok, msg = set_password(state, shop, new_pw)
+            if ok:
+                S["new_creds"] = {"shop": shop["shop_name"], "email": shop["email"], "password": new_pw}
+            _flash("success" if ok else "error", msg)
+            st.rerun()
 
     with st.expander("Edit Shop"):
         with st.form(f"edit_shop_{shop_id}"):
@@ -317,3 +390,4 @@ def page_shop_management(state) -> None:
             S.pop(key, None)
             _flash("success" if ok else "error", msg)
             st.rerun()
+                                                        
