@@ -17,6 +17,7 @@ TAGLINE = "Smart Thinking Leads to a Brighter Future."
 SUSPENDED_MESSAGE = ("Your account is currently suspended. "
                      "Please contact the administrator.")
 MIN_PASSWORD = 8
+ADMIN_CONTACT_EMAIL = "nadishmanzoor64@gmail.com"
 S = st.session_state
 
 
@@ -111,19 +112,6 @@ def logout(state, message: str | None = None) -> None:
         state["_login_notice"] = message
 
 
-def send_password_reset(email: str):
-    """Email a reset link. The result never reveals whether the email exists."""
-    email = (email or "").strip().lower()
-    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-        return False, "Enter a valid email address."
-    try:
-        options = {"redirect_to": sc.app_url()} if sc.app_url() else None
-        sc.new_client().auth.reset_password_for_email(email, options)
-    except Exception:
-        pass  # do not leak whether the address is registered
-    return True, "If that email address belongs to an account, a password reset link has been sent."
-
-
 def change_password(state, current: str, new: str, confirm: str):
     problem = validate_new_password(new, confirm)
     if problem:
@@ -216,10 +204,12 @@ def render_login() -> None:
             (st.error if "suspended" in notice.lower() else st.info)(notice)
         if S.get("_view") == "forgot":
             st.subheader("Forgot password")
-            email = st.text_input("Email address", key="forgot_email")
-            if st.button("Send reset link", type="primary"):
-                ok, msg = send_password_reset(email)
-                (st.success if ok else st.error)(msg)
+            st.info("For security, passwords are reset by the administrator. "
+                    "Send the administrator an email with your shop name and the email address you "
+                    "log in with. They will send you a new password.")
+            st.markdown(f"**Administrator:** [{ADMIN_CONTACT_EMAIL}](mailto:{ADMIN_CONTACT_EMAIL}"
+                        "?subject=SmartStock%20AI%20password%20reset)")
+            st.caption("After you log in with the new password, change it in Account Settings.")
             if st.button("Back to login"):
                 S["_view"] = "login"
                 st.rerun()
