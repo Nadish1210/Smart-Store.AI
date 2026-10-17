@@ -98,28 +98,21 @@ def generate_password(length: int = 12) -> str:
             return pw
 
 
-def create_shop(state, shop_name, owner_name, email, phone="", status="active", password=None):
-    """Create a shop. With ``password`` the admin shares the login; otherwise an invite email is sent."""
+def create_shop(state, shop_name, owner_name, email, phone="", status="active", password=""):
+    """Create a shop. The admin chooses the password and shares it; NO email is ever sent."""
     try:
         f = _clean(shop_name, owner_name, email, phone, status)
-        if password is not None:
-            problem = auth.validate_new_password(password, password)
-            if problem:
-                raise ValueError(problem)
+        problem = auth.validate_new_password(password, password)
+        if problem:
+            raise ValueError(problem)
         _rpc(state, "admin_can_create_shop", {"p_email": f["email"]})  # limit + duplicate pre-check
         svc = sc.service_client(state)
-        if password is not None:
-            result = _auth_call(lambda: svc.auth.admin.create_user({
-                "email": f["email"], "password": password, "email_confirm": True,
-                "user_metadata": {"shop_name": f["shop_name"]}}))
-        else:
-            options = {"data": {"shop_name": f["shop_name"]}}
-            if sc.app_url():
-                options["redirect_to"] = sc.app_url()
-            result = _auth_call(lambda: svc.auth.admin.invite_user_by_email(f["email"], options))
+        result = _auth_call(lambda: svc.auth.admin.create_user({
+            "email": f["email"], "password": password, "email_confirm": True,
+            "user_metadata": {"shop_name": f["shop_name"]}}))
         user = getattr(result, "user", None)
         if user is None:
-            raise AdminError("The invitation could not be created.")
+            raise AdminError("The login account could not be created.")
         try:
             shop = _rpc(state, "admin_register_shop", {
                 "p_user_id": user.id, "p_shop_name": f["shop_name"], "p_owner_name": f["owner_name"],
@@ -130,9 +123,7 @@ def create_shop(state, shop_name, owner_name, email, phone="", status="active", 
             except Exception:
                 pass
             raise
-        if password is not None:
-            return True, f"Shop '{f['shop_name']}' created. Share the login details below with the owner.", shop
-        return True, f"Shop '{f['shop_name']}' created. An invitation email was sent to {f['email']}.", shop
+        return True, f"Shop '{f['shop_name']}' created. Share the login details below with the owner.", shop
     except HANDLED as exc:
         return False, str(exc), None
 
@@ -182,15 +173,6 @@ def set_password(state, shop: dict, password: str):
         svc = sc.service_client(state)
         _auth_call(lambda: svc.auth.admin.update_user_by_id(shop["owner_user_id"], {"password": password}))
         return True, "New password saved. Share it with the shop owner."
-    except HANDLED as exc:
-        return False, str(exc)
-
-
-def send_reset(state, email: str):
-    try:
-        sc.verify_super_admin(state)
-        ok, _ = auth.send_password_reset(email)
-        return (True, f"Password reset email sent to {email}.") if ok else (False, "Invalid email address.")
     except HANDLED as exc:
         return False, str(exc)
 
@@ -283,10 +265,7 @@ def page_shop_management(state) -> None:
             st.error("Shop limit reached (10). Delete a shop before creating another.")
         else:
             st.caption(f"{ov['slots']} slot(s) available.")
-            method = st.radio("How does the owner get access?",
-                              ["I create the password and share it", "Send an email invitation"],
-                              key="create_method")
-            share = method.startswith("I create")
+            st.caption("You choose the owner's password and share it with them. No email is sent.")
             if "gen_pw" not in S:
                 S["gen_pw"] = generate_password()
             nonce = S.setdefault("create_nonce", 0)  # new form key after success = cleared fields
@@ -297,19 +276,16 @@ def page_shop_management(state) -> None:
                 phone = st.text_input("Phone Number (optional)")
                 status = st.selectbox("Account Status", ["active", "suspended"],
                                       format_func=str.title)
-                password = None
-                if share:
-                    password = st.text_input("Password for the owner", value=S["gen_pw"],
-                                             help="A random password is suggested. You can type your own "
-                                                  "(8+ characters, letters and numbers).")
+                password = st.text_input("Password for the owner", value=S["gen_pw"],
+                                         help="A random password is suggested. You can type your own "
+                                              "(8+ characters, letters and numbers).")
                 if st.form_submit_button("Create Shop", type="primary"):
                     ok, msg, shop = create_shop(state, name, owner, email, phone, status, password)
                     if ok:
                         S["create_nonce"] = nonce + 1
-                        if share:
-                            S["new_creds"] = {"shop": shop["shop_name"], "email": shop["email"],
-                                              "password": password}
-                            S["gen_pw"] = generate_password()
+                        S["new_creds"] = {"shop": shop["shop_name"], "email": shop["email"],
+                                          "password": password}
+                        S["gen_pw"] = generate_password()
                         _flash("success", msg)
                         st.rerun()
                     st.error(msg)
@@ -329,21 +305,16 @@ def page_shop_management(state) -> None:
     shop = by_id[shop_id]
     st.write(f"**Status:** {shop['status'].title()}  |  **Registered:** {str(shop['created_at'])[:10]}")
 
-    c1, c2 = st.columns(2)
     if shop["status"] == "active":
-        if c1.button("Suspend Shop", key=f"sus_{shop_id}"):
+        if st.button("Suspend Shop", key=f"sus_{shop_id}"):
             ok, msg = set_status(state, shop_id, "suspended")
             _flash("success" if ok else "error", msg)
             st.rerun()
     else:
-        if c1.button("Activate Shop", key=f"act_{shop_id}", type="primary"):
+        if st.button("Activate Shop", key=f"act_{shop_id}", type="primary"):
             ok, msg = set_status(state, shop_id, "active")
             _flash("success" if ok else "error", msg)
             st.rerun()
-    if c2.button("Send Password Reset", key=f"rst_{shop_id}"):
-        ok, msg = send_reset(state, shop["email"])
-        _flash("success" if ok else "error", msg)
-        st.rerun()
 
     with st.expander("Set a new password for this shop"):
         st.caption("Use this when the owner forgot the password. Then share the new password with them.")
@@ -390,4 +361,4 @@ def page_shop_management(state) -> None:
             S.pop(key, None)
             _flash("success" if ok else "error", msg)
             st.rerun()
-                                                        
+        
