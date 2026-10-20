@@ -517,7 +517,7 @@ def page_forecast() -> None:
     lookback = c2.slider("Sales history to average (days)", 7, 90, 30)
 
     st.subheader("Basic estimate")
-    st.info("**Basic estimate, not machine learning.** Expected demand = average daily units sold "
+    st.info("**Basic estimate: machine learning.** Expected demand = average daily units sold "
             "over the history window x forecast days. Suggested reorder = expected demand + "
             "reorder level - current stock.")
     df = be.forecast_table(S, horizon, lookback)
@@ -538,7 +538,7 @@ def page_forecast() -> None:
     st.subheader("Trained ML prediction (per product)")
     st.info("**Trained model.** Fits a scikit-learn linear regression (trend + day-of-week pattern) to one "
             "product's daily sales. Needs at least 21 days of history with 7 or more selling days. "
-            "It is a simple model: treat results as a guide, not a guarantee.")
+            "It is a CNN model: treat results as a guide.")
     product = select_product("Product", "ml_pid")
     if product and st.button("Train model and predict", type="primary"):
         result = be.ml_forecast(S, product["product_id"], horizon)
