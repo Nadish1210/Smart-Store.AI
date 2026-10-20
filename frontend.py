@@ -43,7 +43,7 @@ st.markdown(
 # Small UI helpers
 # --------------------------------------------------------------------------
 def money(value: float) -> str:
-    return f"{CURRENCY}{value:,.2f}"
+    return f"{CURRENCY}{value:,.1f}".rstrip("0").rstrip(".")
 
 
 def flash(level: str, message: str) -> None:
@@ -58,7 +58,7 @@ def show_flash() -> None:
 
 def show_df(df: pd.DataFrame, money_cols=()) -> None:
     config = {
-        c: st.column_config.NumberColumn(c.replace("_", " ").title(), format=f"{CURRENCY}%.2f")
+        c: st.column_config.NumberColumn(c.replace("_", " ").title(), format=f"{CURRENCY}%.1f")
         for c in money_cols if c in df.columns
     }
     try:
@@ -310,8 +310,8 @@ def page_products() -> None:
                 category = c1.text_input("Category", p["category"])
                 barcode = c2.text_input("Barcode", p["barcode"])
                 c1, c2 = st.columns(2)
-                cost = c1.number_input("Purchase price", 0.0, value=float(p["purchase_price"]), step=0.01, format="%.2f")
-                price = c2.number_input("Selling price", 0.0, value=float(p["selling_price"]), step=0.01, format="%.2f")
+                cost = c1.number_input("Purchase price", 0.0, value=float(p["purchase_price"]), step=0.01, format="%.1f")
+                price = c2.number_input("Selling price", 0.0, value=float(p["selling_price"]), step=0.01, format="%.1f")
                 c1, c2 = st.columns(2)
                 qty = c1.number_input("Quantity", 0, value=int(p["quantity"]), step=1,
                                       help="Changing this records an ADJUST stock movement.")
@@ -348,8 +348,8 @@ def page_add_product() -> None:
         category = c1.text_input("Category *", placeholder="e.g. Dairy")
         barcode = c2.text_input("Barcode", placeholder="Leave blank to auto-generate")
         c1, c2 = st.columns(2)
-        cost = c1.number_input("Purchase price *", 0.0, value=0.0, step=0.01, format="%.2f")
-        price = c2.number_input("Selling price *", 0.0, value=0.0, step=0.01, format="%.2f")
+        cost = c1.number_input("Purchase price *", 0.0, value=0.0, step=0.01, format="%.1f")
+        price = c2.number_input("Selling price *", 0.0, value=0.0, step=0.01, format="%.1f")
         c1, c2 = st.columns(2)
         qty = c1.number_input("Opening quantity", 0, value=0, step=1)
         reorder = c2.number_input("Reorder level", 0, value=5, step=1)
