@@ -227,7 +227,7 @@ def render_login() -> None:
         if st.button("Forgot password"):
             S["_view"] = "forgot"
             st.rerun()
-        st.caption("Accounts are created by the administrator. If you need access, contact them.")
+        st.caption("Accounts are created by the administrator. If you need access, contact them : its.nadish@gmail.com")
 
 
 def render_account_settings() -> None:
