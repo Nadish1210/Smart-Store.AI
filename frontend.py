@@ -16,7 +16,7 @@ import authentication as auth
 import backend as be
 import supabase_client as sc
 
-CURRENCY = "$"
+CURRENCY = "Rs"
 PAGES = ["Dashboard", "Products", "Add Product", "Stock IN", "Sales / Stock OUT",
          "Camera Scanner", "Suppliers", "AI Forecast", "Reports & Backup"]
 SHOP_PAGES = PAGES + ["Account Settings"]
